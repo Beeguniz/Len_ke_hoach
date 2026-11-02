@@ -1,0 +1,8 @@
+{
+    admin off
+}
+
+beegun.site, www.beegun.site {
+    encode gzip
+    reverse_proxy 172.16.0.4:30080
+}

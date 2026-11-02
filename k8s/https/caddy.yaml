@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: caddy
+  namespace: midterm-app
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: caddy
+  template:
+    metadata:
+      labels:
+        app: caddy
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: cp
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      automountServiceAccountToken: false
+      containers:
+        - name: caddy
+          image: caddy:2.11.7-alpine
+          ports:
+            - name: http
+              containerPort: 80
+            - name: https
+              containerPort: 443
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            tcpSocket:
+              port: 443
+            periodSeconds: 5
+          startupProbe:
+            tcpSocket:
+              port: 443
+            periodSeconds: 5
+            failureThreshold: 30
+          volumeMounts:
+            - name: config
+              mountPath: /etc/caddy
+              readOnly: true
+            - name: data
+              mountPath: /data
+            - name: runtime-config
+              mountPath: /config
+      volumes:
+        - name: config
+          configMap:
+            name: caddy-config
+        - name: data
+          hostPath:
+            path: /var/lib/midterm-caddy
+            type: DirectoryOrCreate
+        - name: runtime-config
+          emptyDir: {}

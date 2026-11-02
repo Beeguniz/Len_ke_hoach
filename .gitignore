@@ -1,0 +1,15 @@
+node_modules/
+dist/
+tmp/
+.env
+*.log
+backend/data/
+coverage/
+
+# Private credentials and local cluster access
+*.pem
+*.key
+kubeconfig
+admin.conf
+.env.*
+!.env.example
