@@ -1,0 +1,72 @@
+
+name: Publish Docker Images
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: taskboard-publish
+  cancel-in-progress: false
+
+jobs:
+  verify-and-publish:
+    name: Test, Build and Push
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Lay source code tu GitHub
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      # 2. Cai dat Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      # 3. Cai dat dependencies
+      - name: Install dependencies
+        run: npm ci
+
+      # 4. Chay tests
+      - name: Run tests
+        run: npm test
+
+      # 5. Build ung dung
+      - name: Build application
+        run: npm run build
+
+      # 6. Cau hinh Docker Buildx
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # 7. Dang nhap Docker Hub
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 8. Build va push Backend image
+      - name: Build and push Backend
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./backend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: quyphu123/backend:sha-${{ github.sha }}
+
+      # 9. Build va push Frontend image
+      - name: Build and push Frontend
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./frontend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: quyphu123/frontend:sha-${{ github.sha }}
