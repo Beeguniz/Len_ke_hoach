@@ -1,4 +1,10 @@
-﻿# Bàn giao nhóm — 02/11/2026
+# Cập nhật local — 04/11/2026
+
+Bản quản lý nhóm v2 đã được bổ sung: tài khoản, vai trò, phân công, mô tả, bình luận, lịch sử, Kanban, thống kê và CSV. Hướng dẫn hiện hành: [V2.md](V2.md). Chưa triển khai bản này lên Azure; người dùng cho biết domain đang chạy v1. Nội dung bên dưới là ghi chép lịch sử ngày 02/11, không phải trạng thái mới nhất của HTTPS hoặc chức năng tài khoản.
+
+---
+
+# Bàn giao nhóm — 02/11/2026
 
 ## Đã thực hiện
 

@@ -13,3 +13,7 @@ kubeconfig
 admin.conf
 .env.*
 !.env.example
+
+# Local database backups
+*.sql
+*.dump

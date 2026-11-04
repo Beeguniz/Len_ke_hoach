@@ -34,8 +34,7 @@ echo "Backend:  $OLD_BACKEND -> $BACKEND_IMAGE"
 echo "Frontend: $OLD_FRONTEND -> $FRONTEND_IMAGE"
 
 echo "Deploying backend..."
-kubectl -n "$NAMESPACE" set image deployment/backend \
-  "backend=${BACKEND_IMAGE}"
+kubectl -n "$NAMESPACE" patch deployment backend --type=strategic -p "{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"backend\",\"image\":\"$BACKEND_IMAGE\",\"env\":[{\"name\":\"APP_VERSION\",\"value\":\"v2-$TAG\"},{\"name\":\"SESSION_COOKIE_SECURE\",\"value\":\"true\"}]}]}}}}"
 
 if ! kubectl -n "$NAMESPACE" rollout status \
   deployment/backend --timeout=180s; then

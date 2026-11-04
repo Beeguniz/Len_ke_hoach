@@ -2,7 +2,7 @@
 
 Caddy reverse proxy chạy trong Kubernetes trên cp, dùng hostNetwork để nhận TCP 80/443. Đây không phải Kubernetes Ingress Controller. Ứng dụng tiếp tục dùng NodePort theo yêu cầu bài; không cần cloud LoadBalancer. Đường đi: DNS -> cp:443 -> Caddy -> cp:30080 -> frontend Service -> Pods.
 
-Điều kiện: DNS A beegun.site và www trỏ đúng public IP cp; không có AAAA trỏ sai; NSG cho Internet vào TCP 80/443, đích 172.16.0.4/32. Không mở admin Caddy, database hoặc Kubernetes API. Cả ba VM đang chạy, API NodePort hoạt động. Dữ liệu demo hiện không có đăng nhập: người truy cập web có thể thêm/cập nhật công việc.
+Điều kiện: DNS A beegun.site và www trỏ đúng public IP cp; không có AAAA trỏ sai; NSG cho Internet vào TCP 80/443, đích 172.16.0.4/32. Không mở admin Caddy, database hoặc Kubernetes API. Cả ba VM đang chạy, API NodePort hoạt động. Bản v2 yêu cầu đăng nhập để truy cập công việc; xem docs/V2.md để tạo admin. Secure cookie cần HTTPS, dùng nhất quán beegun.site hoặc www.beegun.site.
 
 Trên Windows, chuyển thư mục https vào ~/k8s trên cp bằng scp.
 

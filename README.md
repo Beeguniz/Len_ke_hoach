@@ -1,60 +1,65 @@
-# Taskboard · CKA 2026
+﻿# Taskboard · Quản lý công việc nhóm
 
-Project giữa kỳ: web quản lý công việc, sau đó đóng gói Docker và triển khai Kubernetes 1 control plane + 2 worker.
-
-## Chạy Docker + PostgreSQL
-
-Đã có Dockerfile frontend/backend, Nginx và Compose dùng PostgreSQL với volume. Xem [hướng dẫn Docker, kiểm thử và push registry](docs/docker.md).
-
-Đã xác minh Docker Desktop ngày 28/10/2026: build thành công, cả 3 container healthy, API qua Nginx hoạt động và 3/3 test đạt (bao gồm PostgreSQL). Dữ liệu giữ nguyên sau restart backend. Mở http://127.0.0.1:8080 khi stack chạy. Chế độ local bên dưới vẫn dùng SQLite riêng.
+Project giữa kỳ CKA 2026: React/Vite, Express, PostgreSQL và Kubernetes kubeadm (1 control plane + 2 worker).
 
 ## Chạy local
 
-Cần Node.js 24 và npm. Mở terminal tại thư mục dự án:
+Cần Node.js 24. PowerShell tại thư mục repository:
 
 ```powershell
 npm.cmd ci
+npm.cmd run admin:create -w backend
 npm.cmd run dev
 ```
 
-Mở http://127.0.0.1:5173. Backend: http://127.0.0.1:3000/health.
-Trên macOS/Linux có thể dùng `npm` thay cho `npm.cmd`.
-Frontend gọi `/api`; Vite chuyển tiếp đến backend cổng 3000.
-Dừng hai tiến trình bằng Ctrl+C. Cổng 3000 và 5173 cần còn trống.
+Mở http://127.0.0.1:5173. Lệnh admin:create hỏi tên/email/mật khẩu và chỉ tạo tài khoản quản trị đầu tiên; không có mật khẩu mặc định. Sau đó tạo các thành viên trong ứng dụng. Nếu đã có tài khoản, bỏ qua bước tạo admin. Trên Linux/macOS dùng npm thay npm.cmd.
 
 ## Chức năng
 
-- Xem, thêm công việc (1–200 ký tự), đánh dấu hoàn thành hoặc mở lại.
-- Lọc tất cả/đang làm/hoàn thành và xem thống kê.
-- Hiển thị trạng thái kết nối API và phiên bản giao diện v1.
-- Lưu vào `backend/data/tasks.db`, giữ dữ liệu qua lần khởi động lại.
-- Kiểm tra sức khỏe `/health` và `/api/health`, trả version và hostname.
+- Đăng nhập, đổi mật khẩu, vai trò quản trị/thành viên, khóa tài khoản.
+- Tạo/sửa/xóa công việc, mô tả, phân công, hạn, ưu tiên và nhãn.
+- Trạng thái Chưa làm / Đang làm / Hoàn thành; danh sách và Kanban.
+- Bình luận, lịch sử thay đổi, tìm kiếm không dấu, bộ lọc, sắp xếp.
+- Thống kê theo thành viên, nhận biết quá hạn và xuất CSV.
 
-## Kiểm tra
+Mọi thành viên xem được dữ liệu nhóm. Người tạo, người phụ trách và admin được sửa; chỉ người tạo/admin được xóa. Quyền được kiểm tra ở backend.
+
+## Kiểm thử
 
 ```powershell
 npm.cmd test
 npm.cmd run build
+docker compose -p taskboard-team-test -f compose.test.yaml up --build --abort-on-container-exit --exit-code-from test
+docker compose -p taskboard-team-test -f compose.test.yaml down
 ```
 
-Test dùng database tạm riêng; không sửa dữ liệu đang dùng. Kiểm tra tạo/cập nhật, dữ liệu sai, ID không tồn tại, lưu bền vững.
-Build tạo `frontend/dist`. Dockerfile frontend build rồi dùng Nginx phục vụ và proxy `/api` đến backend. Test PostgreSQL tự bỏ qua nếu chưa cấu hình `TEST_DATABASE_URL`; stack test riêng nằm trong `compose.test.yaml`.
+Local bỏ qua test PostgreSQL nếu không có TEST_DATABASE_URL; Docker và CI chạy đầy đủ trên database tạm. Không dùng database production để chạy test.
+
+## Docker và triển khai
+
+- [Nâng cấp v2, tạo admin và ma trận quyền](docs/V2.md)
+- [Docker và Docker Hub](docs/docker.md)
+- [Kubernetes](k8s/DEPLOY.md)
+- [HTTPS qua Caddy](k8s/https/README.md)
+- [Bàn giao nhóm](docs/HANDOFF.md)
+
+GitHub Actions CI chạy test/build. Workflow Publish Docker Images chạy thủ công, tạo tag sha-<commit>. scripts/deploy.sh chạy trên cp để cập nhật backend trước, frontend sau; scripts/rollback.sh quay về revision trước. Đọc hướng dẫn v2 trước khi chuyển từ bản công khai v1 sang bản có đăng nhập.
+
+SQLite local ở backend/data/tasks.db; Compose/Kubernetes dùng PostgreSQL chung. Migration giữ dữ liệu cũ, không tự chuyển SQLite sang PostgreSQL. Sao lưu PostgreSQL trước nâng cấp. Không commit .env, private key, kubeconfig hoặc backup DB.
 
 ## API
 
-| Method | Endpoint | Body |
+/live và /health, /api/health công khai để kiểm tra sức khỏe. Các API còn lại yêu cầu cookie phiên (ngoại trừ POST /api/auth/login). Mọi yêu cầu POST/PATCH/DELETE cần header X-Taskboard-Request: 1.
+
+| Method | Endpoint | Mục đích |
 |---|---|---|
-| GET | `/health`, `/api/health` | — |
-| GET | `/api/tasks` | — |
-| POST | `/api/tasks` | `{"title":"Chuẩn bị demo"}` |
-| PATCH | `/api/tasks/:id` | `{"completed":true}` |
+| POST | /api/auth/login, /api/auth/logout | Đăng nhập/đăng xuất |
+| GET | /api/auth/me | Tài khoản hiện tại |
+| POST | /api/auth/password | Đổi mật khẩu và thu hồi phiên |
+| GET, POST | /api/users | Danh sách / tạo thành viên (admin) |
+| PATCH | /api/users/:id | Vai trò / khóa tài khoản (admin) |
+| GET, POST | /api/tasks | Danh sách / tạo công việc |
+| GET, PATCH, DELETE | /api/tasks/:id | Chi tiết / cập nhật / xóa |
+| POST | /api/tasks/:id/comments | Bình luận |
 
-Backend dùng biến môi trường `PORT` (mặc định 3000), `DB_PATH` và `APP_VERSION` (mặc định v1). Nếu đổi PORT, cập nhật proxy trong `frontend/vite.config.js`.
-Frontend dùng `VITE_APP_VERSION` khi khởi động/build để thay nhãn phiên bản.
-
-## Giới hạn và bước tiếp theo
-
-SQLite chỉ dành cho local một backend. Compose dùng PostgreSQL chung; dữ liệu SQLite không tự chuyển sang PostgreSQL. Chưa có đăng nhập/phân quyền; đây là ứng dụng demo.
-Backend nghe loopback khi chạy local; Dockerfile đặt HOST=0.0.0.0 cho container. Production bắt buộc DB_DRIVER=postgres.
-
-Xem [bàn giao cho nhóm](docs/HANDOFF.md), [triển khai Kubernetes](k8s/DEPLOY.md) và [HTTPS](k8s/https/README.md).
+Một nhóm dùng chung dữ liệu; chưa có upload file, gửi email hoặc realtime. PostgreSQL chỉ có một replica trên cp, không phải database HA.
