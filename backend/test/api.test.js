@@ -1,3 +1,4 @@
+import { authenticatedFetch } from './helpers.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
@@ -14,6 +15,7 @@ test('API validates input, creates and updates tasks, and persists after reopeni
   const server = createApp(store).listen(0, '127.0.0.1');
   await once(server, 'listening');
   const url = `http://127.0.0.1:${server.address().port}`;
+  const fetch = await authenticatedFetch(store, url);
   const request = (route, method, body) => fetch(url + route, {
     method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
   });
@@ -30,6 +32,20 @@ test('API validates input, creates and updates tasks, and persists after reopeni
     assert.equal((await request('/api/tasks/missing', 'PATCH', { completed: true })).status, 404);
     assert.equal((await (await request(`/api/tasks/${task.id}`, 'PATCH', { completed: true })).json()).completed, true);
     assert.equal((await (await fetch(url + '/api/tasks')).json()).length, 1);
+    for (const invalid of [{ dueDate: '2026-02-30' }, { dueDate: '' }, { priority: 'urgent' }, { title: ' ' }, {}]) {
+      assert.equal((await request(`/api/tasks/${task.id}`, 'PATCH', invalid)).status, 400);
+    }
+    const edited = await (await request(`/api/tasks/${task.id}`, 'PATCH', { title: 'Updated', priority: 'high', dueDate: '2028-02-29' })).json();
+    assert.equal(edited.completed, true);
+    assert.equal(edited.title, 'Updated');
+    assert.equal(edited.priority, 'high');
+    assert.equal(edited.dueDate, '2028-02-29');
+    assert.equal((await (await request(`/api/tasks/${task.id}`, 'PATCH', { dueDate: null })).json()).dueDate, null);
+    const disposable = await (await request('/api/tasks', 'POST', { title: 'Delete me', dueDate: '2026-11-19', priority: 'low' })).json();
+    assert.equal(disposable.priority, 'low');
+    assert.equal((await request(`/api/tasks/${disposable.id}`, 'DELETE')).status, 204);
+    assert.equal((await request(`/api/tasks/${disposable.id}`, 'DELETE')).status, 404);
+
     await new Promise(resolve => server.close(resolve));
     store.close();
     const reopened = createStore(path);

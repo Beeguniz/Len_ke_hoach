@@ -4,7 +4,7 @@ COPY package.json package-lock.json ./
 COPY frontend/package.json ./frontend/package.json
 RUN npm ci --workspace frontend --include=dev
 COPY frontend ./frontend
-ARG APP_VERSION=v1
+ARG APP_VERSION=v2
 ENV VITE_APP_VERSION=$APP_VERSION
 RUN npm run build --workspace frontend
 

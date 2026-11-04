@@ -1,54 +1,71 @@
-import React, { useEffect, useState } from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { api, json, statuses, priorities, today, overdue, normalize, formatDate } from './api';
+import { TaskEditor, TaskDetail, PasswordDialog, Members } from './components';
 import './style.css';
 
-async function api(path, options) {
-  const response = await fetch('/api' + path, { ...options, headers: { 'Content-Type': 'application/json' } });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'Không thể kết nối máy chủ.');
-  return data;
+function Login({ onLogin, notice }) {
+  const [email, setEmail] = useState(''), [password, setPassword] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('');
+  async function submit(event) { event.preventDefault(); setBusy(true); setError(''); try { onLogin(await api('/auth/login', json('POST', { email, password }))); } catch (err) { setError(err.message); } finally { setBusy(false); } }
+  return <div className="login-layout"><section className="login-intro"><a className="brand" href="/">◈ taskboard</a><p className="eyebrow">KHÔNG GIAN LÀM VIỆC CỦA NHÓM</p><h1>Cùng lên kế hoạch.<br />Cùng hoàn thành.</h1><p>Một nơi cho công việc, trao đổi và những tiến bộ mỗi ngày.</p><div className="login-decoration" aria-hidden="true"><span>01 · Lên kế hoạch</span><span>02 · Cùng thực hiện</span><span>03 · Hoàn thành</span></div></section><section className="login-form"><p className="eyebrow">CHÀO MỪNG TRỞ LẠI</p><h2>Đăng nhập</h2><p className="muted">Dùng tài khoản do quản trị viên nhóm cung cấp.</p>{notice && <p className="success" role="status">{notice}</p>}<form className="editor" onSubmit={submit}><label>Email<input type="email" autoComplete="username" autoFocus required maxLength={254} value={email} disabled={busy} onChange={e => setEmail(e.target.value)} /></label><label>Mật khẩu<input type="password" autoComplete="current-password" required maxLength={128} value={password} disabled={busy} onChange={e => setPassword(e.target.value)} /></label>{error && <p className="error" role="alert">{error}</p>}<button className="primary" disabled={busy}>{busy ? 'Đang đăng nhập…' : 'Vào không gian làm việc →'}</button></form></section></div>;
 }
-
-function App() {
-  const [tasks, setTasks] = useState([]);
-  const [health, setHealth] = useState(null);
-  const [title, setTitle] = useState('');
-  const [filter, setFilter] = useState('all');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  async function load() {
+function Statistics({ tasks, users, date }) {
+  const done = tasks.filter(task => task.status === 'done').length, percent = tasks.length ? Math.round(done / tasks.length * 100) : 0;
+  return <section className="board"><div className="board-heading"><h2>Tiến độ của nhóm</h2><strong>{percent}% hoàn thành</strong></div><progress aria-label="Tiến độ toàn nhóm" value={done} max={tasks.length || 1} /><p className="muted">{done}/{tasks.length} công việc đã hoàn thành · {tasks.filter(task => overdue(task, date)).length} quá hạn</p><div className="table-scroll"><table><thead><tr><th>Người phụ trách</th><th>Tổng</th><th>Đang làm</th><th>Hoàn thành</th><th>Quá hạn</th></tr></thead><tbody>{[{ id: null, name: 'Chưa phân công' }, ...users].map(user => { const own = tasks.filter(task => task.assigneeId === user.id); return <tr key={user.id || 'none'}><td>{user.name}</td><td>{own.length}</td><td>{own.filter(task => task.status === 'doing').length}</td><td>{own.filter(task => task.status === 'done').length}</td><td>{own.filter(task => overdue(task, date)).length}</td></tr>; })}</tbody></table></div></section>;
+}
+function TeamApp({ user, onLogout }) {
+  const [tasks, setTasks] = useState([]), [users, setUsers] = useState([]), [health, setHealth] = useState(null);
+  const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const [page, setPage] = useState('tasks'), [view, setView] = useState('list');
+  const [search, setSearch] = useState(''), [status, setStatus] = useState('all'), [assignee, setAssignee] = useState('all'), [priority, setPriority] = useState('all'), [label, setLabel] = useState('all'), [sort, setSort] = useState('newest');
+  const [editor, setEditor] = useState(null), [detail, setDetail] = useState(null), [passwordOpen, setPasswordOpen] = useState(false), [date, setDate] = useState(today());
+  async function refresh() {
     setLoading(true); setError('');
-    try { const [items, status] = await Promise.all([api('/tasks'), api('/health')]); setTasks(items); setHealth(status); }
-    catch { setHealth(null); setError('Không tải được dữ liệu. Kiểm tra backend rồi thử lại.'); }
-    finally { setLoading(false); }
+    try { const [items, members, status] = await Promise.all([api('/tasks'), api('/users'), api('/health')]); setTasks(items); setUsers(members); setHealth(status); }
+    catch (err) { setError(err.message); setHealth(null); } finally { setLoading(false); }
   }
-  useEffect(() => { load(); }, []);
-  async function add(event) {
-    event.preventDefault(); if (!title.trim() || busy) return;
-    setBusy(true); setError('');
-    try { const task = await api('/tasks', { method: 'POST', body: JSON.stringify({ title }) }); setTasks(items => [task, ...items]); setTitle(''); }
-    catch (err) { setError(err.message); } finally { setBusy(false); }
+  useEffect(() => { refresh(); const timer = setInterval(() => setDate(today()), 60000); return () => clearInterval(timer); }, []);
+  const editable = task => user.role === 'admin' || task.creatorId === user.id || task.assigneeId === user.id;
+  const deletable = task => user.role === 'admin' || task.creatorId === user.id;
+  const userName = id => users.find(member => member.id === id)?.name || 'Chưa phân công';
+  async function save(data) {
+    setBusy(true);
+    try { const result = await api(editor.id ? '/tasks/' + editor.id : '/tasks', json(editor.id ? 'PATCH' : 'POST', data)); setTasks(items => editor.id ? items.map(item => item.id === result.id ? result : item) : [result, ...items]); }
+    finally { setBusy(false); }
   }
-  async function toggle(task) {
-    setBusy(true); setError('');
-    try { const updated = await api(`/tasks/${task.id}`, { method: 'PATCH', body: JSON.stringify({ completed: !task.completed }) }); setTasks(items => items.map(item => item.id === task.id ? updated : item)); }
-    catch (err) { setError(err.message); } finally { setBusy(false); }
+  async function changeStatus(task, next) {
+    setBusy(true); setError(''); try { const result = await api('/tasks/' + task.id, json('PATCH', { status: next })); setTasks(items => items.map(item => item.id === result.id ? result : item)); } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
-  const completed = tasks.filter(task => task.completed).length;
-  const visible = tasks.filter(task => filter === 'all' || (filter === 'done' ? task.completed : !task.completed));
-  return <div className="layout">
-    <aside><a className="brand" href="/">◈ <span>taskboard</span></a><div className="workspace">KHÔNG GIAN LÀM VIỆC</div><div className="nav-item">▦ <span>Công việc của nhóm</span></div><div className="aside-bottom"><span className="avatar">05</span><div>Nhóm giữa kỳ<small>CKA · 2026</small></div></div></aside>
-    <main><header><span>Workspace / <strong>Công việc</strong></span><span className="version">{import.meta.env.VITE_APP_VERSION || 'v1'}</span></header>
-      <section className="intro"><p className="eyebrow">CÙNG NHAU HOÀN THÀNH</p><h1>Việc nhỏ hôm nay.<br />Tiến bộ mỗi ngày.</h1><p>Theo dõi công việc của nhóm, từ ý tưởng đến hoàn thành.</p></section>
-      <section className="stats" aria-label="Thống kê"><div><span>Tổng công việc</span><strong>{tasks.length.toString().padStart(2, '0')}</strong></div><div><span>Đang thực hiện</span><strong>{(tasks.length - completed).toString().padStart(2, '0')}</strong></div><div><span>Đã hoàn thành</span><strong className="green">{completed.toString().padStart(2, '0')}</strong></div></section>
-      <section className="board"><div className="board-heading"><h2>Danh sách công việc</h2><button className="refresh" onClick={load} disabled={loading || busy}>↻ Làm mới</button></div>
-        <form onSubmit={add}><label className="sr-only" htmlFor="task-title">Tên công việc</label><input id="task-title" value={title} onChange={event => setTitle(event.target.value)} maxLength={200} placeholder="Nhóm mình cần làm gì tiếp theo?" required disabled={loading || busy} /><button className="add" disabled={loading || busy || !title.trim()}>+ Thêm công việc</button></form>
-        {error && <p role="alert" className="error">{error}</p>}
-        <div className="filters">{[['all','Tất cả'],['active','Đang làm'],['done','Hoàn thành']].map(([id,label]) => <button key={id} aria-pressed={filter === id} className={filter === id ? 'selected' : ''} onClick={() => setFilter(id)}>{label}</button>)}</div>
-        {loading ? <div className="empty" role="status">Đang tải công việc…</div> : visible.length ? <ul>{visible.map(task => <li key={task.id}><input type="checkbox" aria-label={`Hoàn thành: ${task.title}`} checked={task.completed} disabled={busy} onChange={() => toggle(task)} /><div><span className={task.completed ? 'done' : ''}>{task.title}</span><small>{new Date(task.createdAt).toLocaleDateString('vi-VN')}</small></div><span className={`badge ${task.completed ? 'finished' : ''}`}>{task.completed ? 'Hoàn thành' : 'Đang làm'}</span></li>)}</ul> : <div className="empty"><span className="empty-icon">✓</span><h3>{error ? 'Dữ liệu chưa sẵn sàng' : filter === 'all' ? 'Bắt đầu với một công việc nhỏ' : 'Chưa có công việc trong mục này'}</h3><p>{error ? 'Nhấn Làm mới để kết nối lại.' : 'Thêm công việc ở trên và cùng nhóm hoàn thành nhé.'}</p></div>}
-      </section><footer><span className={health ? 'connected' : ''}>● {health ? 'Đã kết nối backend' : 'Chưa kết nối backend'}</span><span>CKA 2026 · Project giữa kỳ</span></footer>
-    </main></div>;
+  async function remove(task) {
+    if (!window.confirm(`Xóa “${task.title}” cùng bình luận và lịch sử? Không thể hoàn tác.`)) return;
+    setBusy(true); setError(''); try { await api('/tasks/' + task.id, { method: 'DELETE' }); setTasks(items => items.filter(item => item.id !== task.id)); } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+  async function logout() { setBusy(true); try { await api('/auth/logout', { method: 'POST' }); onLogout('Đã đăng xuất.'); } catch (err) { setError(err.message); } finally { setBusy(false); } }
+  const visible = tasks.filter(task => normalize(task.title + ' ' + task.description).includes(normalize(search.trim())) && (status === 'all' || (status === 'overdue' ? overdue(task, date) : task.status === status)) && (assignee === 'all' || (assignee === 'none' ? !task.assigneeId : task.assigneeId === assignee)) && (priority === 'all' || task.priority === priority) && (label === 'all' || task.labels.includes(label))).sort((a, b) => {
+    if (sort === 'title') return a.title.localeCompare(b.title, 'vi');
+    if (sort === 'due') return (a.dueDate || '9999-12-31').localeCompare(b.dueDate || '9999-12-31') || b.createdAt.localeCompare(a.createdAt);
+    if (sort === 'priority') { const rank = { high: 0, medium: 1, low: 2 }; return rank[a.priority] - rank[b.priority] || b.createdAt.localeCompare(a.createdAt); }
+    return b.createdAt.localeCompare(a.createdAt);
+  });
+  function exportCsv() {
+    const cell = value => { let text = String(value ?? ''); if (/^[\s]*[=+@-]|^[\t\r\n]/.test(text)) text = "'" + text; return '"' + text.replaceAll('"', '""') + '"'; };
+    const rows = [['Công việc', 'Mô tả', 'Trạng thái', 'Ưu tiên', 'Hạn', 'Người phụ trách', 'Nhãn'], ...visible.map(task => [task.title, task.description, statuses[task.status], priorities[task.priority], task.dueDate, userName(task.assigneeId), task.labels.join(', ')])];
+    const url = URL.createObjectURL(new Blob(['\uFEFF' + rows.map(row => row.map(cell).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' })); const link = document.createElement('a'); link.href = url; link.download = `taskboard-${date}.csv`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  function card(task) {
+    return <article key={task.id} className={`task-card ${overdue(task, date) ? 'overdue-card' : ''}`}><div className="task-content"><button className={`task-title ${task.status === 'done' ? 'completed' : ''}`} onClick={() => setDetail(task.id)}>{task.title}</button>{task.description && <p className="task-description">{task.description}</p>}<div className="task-meta"><span className={'priority priority-' + task.priority}>Ưu tiên {priorities[task.priority]}</span><span className={overdue(task, date) ? 'overdue' : ''}>{overdue(task, date) ? 'Quá hạn · ' : ''}{formatDate(task.dueDate)}</span></div><div className="task-meta"><span className="person">◉ {userName(task.assigneeId)}</span>{task.labels.map(text => <span className="tag" key={text}>{text}</span>)}</div></div><div className="task-actions"><select aria-label={`Trạng thái: ${task.title}`} disabled={busy || loading || !editable(task)} value={task.status} onChange={e => changeStatus(task, e.target.value)}>{Object.entries(statuses).map(([id, text]) => <option value={id} key={id}>{text}</option>)}</select><div className="action-row"><button onClick={() => setDetail(task.id)}>Chi tiết</button>{editable(task) && <button disabled={busy || loading} onClick={() => setEditor(task)}>Sửa</button>}{deletable(task) && <button className="danger" disabled={busy || loading} onClick={() => remove(task)}>Xóa</button>}</div></div></article>;
+  }
+  const completed = tasks.filter(task => task.status === 'done').length;
+  return <div className="layout"><aside><a className="brand" href="/">◈ <span>taskboard</span></a><p className="workspace-label">KHÔNG GIAN LÀM VIỆC</p><nav aria-label="Điều hướng">{[['tasks', '▦', 'Công việc'], ['stats', '◔', 'Thống kê'], ['members', '♧', 'Thành viên']].map(([id, icon, text]) => <button key={id} className={page === id ? 'active' : ''} onClick={() => setPage(id)}><span aria-hidden="true">{icon}</span>{text}</button>)}</nav><div className="account"><span className="avatar">{user.name.slice(0, 1).toUpperCase()}</span><strong>{user.name}</strong><small>{user.role === 'admin' ? 'Quản trị viên' : 'Thành viên'}</small><button onClick={() => setPasswordOpen(true)}>Đổi mật khẩu</button><button onClick={logout} disabled={busy}>Đăng xuất</button></div></aside><main><header><span>Workspace / <strong>{page === 'tasks' ? 'Công việc' : page === 'stats' ? 'Thống kê' : 'Thành viên'}</strong></span><span className="version">{import.meta.env.VITE_APP_VERSION || 'v2'}</span></header><section className="intro"><div><p className="eyebrow">CÙNG NHAU HOÀN THÀNH</p><h1>Việc nhỏ hôm nay.<br />Tiến bộ mỗi ngày.</h1><p className="muted">Xin chào {user.name}. Cùng theo dõi tiến độ của nhóm nhé.</p></div><button className="primary" onClick={() => setEditor({})} disabled={loading || busy}>+ Tạo công việc</button></section><section className="stats" aria-label="Thống kê tổng quan"><div><span>Tổng công việc</span><strong>{tasks.length}</strong></div><div><span>Đang thực hiện</span><strong>{tasks.filter(task => task.status === 'doing').length}</strong></div><div><span>Đã hoàn thành</span><strong className="green">{completed}</strong></div><div><span>Quá hạn</span><strong className="overdue">{tasks.filter(task => overdue(task, date)).length}</strong></div></section>{error && <p className="error" role="alert">{error} <button onClick={refresh} disabled={loading || busy}>Thử lại</button></p>}
+    {page === 'tasks' && <section className="board"><div className="board-heading"><h2>Công việc của nhóm</h2><div className="action-row"><button onClick={refresh} disabled={loading || busy}>↻ Làm mới</button><button disabled={!visible.length || loading} onClick={exportCsv}>Xuất CSV</button></div></div><div className="toolbar"><label className="search-field">Tìm công việc<input type="search" placeholder="Tên hoặc mô tả, có dấu hoặc không dấu…" value={search} onChange={e => setSearch(e.target.value)} /></label><label>Sắp xếp<select value={sort} onChange={e => setSort(e.target.value)}><option value="newest">Mới nhất</option><option value="due">Hạn gần nhất</option><option value="priority">Ưu tiên cao trước</option><option value="title">Tên A–Z</option></select></label></div><div className="filter-grid"><label>Trạng thái<select value={status} onChange={e => setStatus(e.target.value)}><option value="all">Tất cả trạng thái</option>{Object.entries(statuses).map(([id, text]) => <option key={id} value={id}>{text}</option>)}<option value="overdue">Quá hạn</option></select></label><label>Người phụ trách<select value={assignee} onChange={e => setAssignee(e.target.value)}><option value="all">Tất cả thành viên</option><option value="none">Chưa phân công</option>{users.map(member => <option key={member.id} value={member.id}>{member.name}{member.id === user.id ? ' (tôi)' : ''}</option>)}</select></label><label>Ưu tiên<select value={priority} onChange={e => setPriority(e.target.value)}><option value="all">Tất cả mức ưu tiên</option>{Object.entries(priorities).map(([id, text]) => <option key={id} value={id}>{text}</option>)}</select></label><label>Nhãn<select value={label} onChange={e => setLabel(e.target.value)}><option value="all">Tất cả nhãn</option>{[...new Set([...tasks.flatMap(task => task.labels), ...(label !== 'all' ? [label] : [])])].sort().map(text => <option key={text} value={text}>{text}</option>)}</select></label></div><div className="view-bar"><span className="muted">{visible.length} / {tasks.length} công việc</span><div className="view-toggle"><button aria-pressed={view === 'list'} className={view === 'list' ? 'selected' : ''} onClick={() => setView('list')}>Danh sách</button><button aria-pressed={view === 'kanban'} className={view === 'kanban' ? 'selected' : ''} onClick={() => setView('kanban')}>Kanban</button></div></div>{loading ? <p className="empty" role="status">Đang tải công việc…</p> : view === 'kanban' ? <div className="kanban">{Object.entries(statuses).map(([id, text]) => <section className={'kanban-column column-' + id} key={id}><h3>{text}<span>{visible.filter(task => task.status === id).length}</span></h3>{visible.filter(task => task.status === id).map(card)}{!visible.some(task => task.status === id) && <p className="column-empty">Chưa có công việc</p>}</section>)}</div> : visible.length ? <div className="task-list">{visible.map(card)}</div> : <div className="empty"><span className="empty-icon">✓</span><h3>{tasks.length ? 'Không có công việc phù hợp' : 'Bắt đầu với một công việc nhỏ'}</h3><p>{tasks.length ? 'Thử thay đổi bộ lọc hoặc từ khóa tìm kiếm.' : 'Tạo công việc đầu tiên và cùng nhóm hoàn thành nhé.'}</p></div>}</section>}
+    {page === 'stats' && <Statistics tasks={tasks} users={users} date={date} />}{page === 'members' && <Members users={users} currentUser={user} refresh={refresh} />}
+    <footer><span className={health ? 'green' : ''}>● {health ? 'Đã kết nối' : 'Chưa kết nối'}{health ? ` · API ${health.version}` : ''}</span><span>CKA 2026 · Không gian làm việc nhóm</span></footer></main>{editor && <TaskEditor task={editor.id ? editor : null} users={users} onSave={save} onClose={() => setEditor(null)} />}{detail && <TaskDetail id={detail} onClose={() => setDetail(null)} />}{passwordOpen && <PasswordDialog onClose={() => setPasswordOpen(false)} onChanged={() => onLogout('Đã đổi mật khẩu. Vui lòng đăng nhập lại.')} />}</div>;
 }
-
+function App() {
+  const [user, setUser] = useState(undefined), [error, setError] = useState(''), [notice, setNotice] = useState('');
+  async function check() { setError(''); try { setUser(await api('/auth/me')); } catch (err) { if (err.status === 401) setUser(null); else setError('Không kết nối được máy chủ. Hãy kiểm tra backend và thử lại.'); } }
+  useEffect(() => { check(); const expired = () => { setUser(null); setNotice('Vui lòng đăng nhập để tiếp tục.'); }; window.addEventListener('session-expired', expired); return () => window.removeEventListener('session-expired', expired); }, []);
+  if (user === undefined) return <div className="boot"><h1>taskboard</h1>{error ? <><p role="alert">{error}</p><button onClick={check}>Thử lại</button></> : <p role="status">Đang kết nối…</p>}</div>;
+  return user ? <TeamApp user={user} onLogout={message => { setUser(null); setNotice(message); }} /> : <Login notice={notice} onLogin={value => { setUser(value); setNotice(''); }} />;
+}
 createRoot(document.getElementById('root')).render(<App />);

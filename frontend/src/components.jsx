@@ -1,0 +1,50 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { api, json, statuses, priorities } from './api';
+
+export function Dialog({ title, children, onClose, busy = false }) {
+  const ref = useRef(null);
+  const titleId = React.useId();
+  useEffect(() => { const dialog = ref.current; dialog.showModal(); return () => dialog.close(); }, []);
+  return <dialog ref={ref} aria-labelledby={titleId} onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}><div className="dialog-heading"><h2 id={titleId}>{title}</h2><button className="icon-button" aria-label="Đóng" disabled={busy} onClick={onClose}>×</button></div>{children}</dialog>;
+}
+export function TaskEditor({ task, users, onSave, onClose }) {
+  const [draft, setDraft] = useState({ title: task?.title || '', description: task?.description || '', status: task?.status || 'todo', priority: task?.priority || 'medium', dueDate: task?.dueDate || '', assigneeId: task?.assigneeId || '', labels: task?.labels?.join(', ') || '' });
+  const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const field = key => ({ value: draft[key], onChange: event => setDraft({ ...draft, [key]: event.target.value }), disabled: busy });
+  async function submit(event) {
+    event.preventDefault(); setBusy(true); setError('');
+    try { await onSave({ ...draft, dueDate: draft.dueDate || null, assigneeId: draft.assigneeId || null, labels: draft.labels.split(',').map(x => x.trim()).filter(Boolean) }); onClose(); }
+    catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+  return <Dialog title={task ? 'Sửa công việc' : 'Tạo công việc'} onClose={onClose} busy={busy}><form onSubmit={submit} className="editor">
+    <label>Tên công việc<input autoFocus required maxLength={200} {...field('title')} placeholder="Ví dụ: Hoàn thiện báo cáo giữa kỳ" /></label>
+    <label>Mô tả<textarea rows={4} maxLength={5000} {...field('description')} placeholder="Mục tiêu, yêu cầu và những điều cần lưu ý…" /></label>
+    <div className="form-grid"><label>Trạng thái<select aria-label="Trạng thái" {...field('status')}>{Object.entries(statuses).map(([id, text]) => <option key={id} value={id}>{text}</option>)}</select></label><label>Ưu tiên<select aria-label="Ưu tiên" {...field('priority')}>{Object.entries(priorities).map(([id, text]) => <option key={id} value={id}>{text}</option>)}</select></label><label>Hạn hoàn thành<input type="date" min="0001-01-01" max="9999-12-31" {...field('dueDate')} /></label><label>Người phụ trách<select aria-label="Người phụ trách" {...field('assigneeId')}><option value="">Chưa phân công</option>{users.filter(user => user.active || user.id === draft.assigneeId).map(user => <option key={user.id} value={user.id} disabled={!user.active}>{user.name}{!user.active ? ' (đã khóa)' : ''}</option>)}</select></label></div>
+    <label>Nhãn<input aria-label="Nhãn" maxLength={154} {...field('labels')} placeholder="Frontend, Báo cáo, Demo" /><small>Tối đa 5 nhãn, phân cách bằng dấu phẩy.</small></label>
+    {error && <p className="error" role="alert">{error}</p>}<div className="dialog-actions"><button type="button" disabled={busy} onClick={onClose}>Hủy</button><button className="primary" disabled={busy || !draft.title.trim()}>{busy ? 'Đang lưu…' : 'Lưu công việc'}</button></div>
+  </form></Dialog>;
+}
+export function TaskDetail({ id, onClose }) {
+  const [detail, setDetail] = useState(null), [error, setError] = useState(''), [body, setBody] = useState(''), [busy, setBusy] = useState(false);
+  async function load() { try { setDetail(await api('/tasks/' + id)); setError(''); } catch (err) { setError(err.message); } }
+  useEffect(() => { load(); }, [id]);
+  async function submit(event) { event.preventDefault(); setBusy(true); setError(''); try { await api(`/tasks/${id}/comments`, json('POST', { body })); setBody(''); await load(); } catch (err) { setError(err.message); } finally { setBusy(false); } }
+  return <Dialog title={detail?.task.title || 'Chi tiết công việc'} onClose={onClose} busy={busy}>
+    {error && <p role="alert" className="error">{error}<button onClick={load} disabled={busy}>Thử lại</button></p>}
+    {!detail ? <p role="status">Đang tải chi tiết…</p> : <><p className="description">{detail.task.description || 'Chưa có mô tả.'}</p><div className="detail-meta"><span className="pill">{statuses[detail.task.status]}</span><span className="pill">Ưu tiên {priorities[detail.task.priority]}</span></div><h3>Bình luận ({detail.comments.length})</h3><div className="comments">{detail.comments.length ? detail.comments.map(comment => <article key={comment.id}><strong>{comment.author}</strong><time>{new Date(comment.created_at).toLocaleString('vi-VN')}</time><p>{comment.body}</p></article>) : <p className="muted">Chưa có bình luận. Cùng trao đổi về công việc này nhé.</p>}</div><form onSubmit={submit} className="editor"><label>Bình luận mới<textarea rows={3} maxLength={2000} required value={body} disabled={busy} onChange={event => setBody(event.target.value)} /></label><button className="primary" disabled={busy || !body.trim()}>{busy ? 'Đang gửi…' : 'Gửi bình luận'}</button></form><h3>Lịch sử thay đổi</h3><p className="muted">100 hoạt động gần nhất của công việc.</p><ol className="timeline">{detail.activity.map(item => <li key={item.id}><strong>{item.author}</strong> · {item.detail}<time>{new Date(item.created_at).toLocaleString('vi-VN')}</time></li>)}</ol></>}
+  </Dialog>;
+}
+export function PasswordDialog({ onClose, onChanged }) {
+  const [currentPassword, setCurrent] = useState(''), [password, setPassword] = useState(''), [confirm, setConfirm] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('');
+  async function submit(event) { event.preventDefault(); if (password !== confirm) return setError('Mật khẩu xác nhận không khớp.'); setBusy(true); try { await api('/auth/password', json('POST', { currentPassword, password })); onChanged(); } catch (err) { setError(err.message); } finally { setBusy(false); } }
+  return <Dialog title="Đổi mật khẩu" onClose={onClose} busy={busy}><form className="editor" onSubmit={submit}><label>Mật khẩu hiện tại<input type="password" autoComplete="current-password" required maxLength={128} value={currentPassword} disabled={busy} onChange={e => setCurrent(e.target.value)} /></label><label>Mật khẩu mới<input type="password" autoComplete="new-password" required minLength={12} maxLength={128} value={password} disabled={busy} onChange={e => setPassword(e.target.value)} /></label><label>Nhập lại mật khẩu mới<input type="password" autoComplete="new-password" required minLength={12} maxLength={128} value={confirm} disabled={busy} onChange={e => setConfirm(e.target.value)} /></label><p className="muted">Dùng 12–128 ký tự. Đổi mật khẩu sẽ đăng xuất tất cả thiết bị.</p>{error && <p role="alert" className="error">{error}</p>}<button className="primary" disabled={busy}>{busy ? 'Đang lưu…' : 'Đổi mật khẩu'}</button></form></Dialog>;
+}
+export function Members({ users, currentUser, refresh }) {
+  const [draft, setDraft] = useState({ name: '', email: '', password: '', role: 'member' }), [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false);
+  async function create(event) { event.preventDefault(); setBusy(true); setError(''); setNotice(''); try { await api('/users', json('POST', draft)); setDraft({ name: '', email: '', password: '', role: 'member' }); await refresh(); setNotice('Đã tạo tài khoản. Gửi thông tin đăng nhập cho thành viên qua kênh riêng.'); } catch (err) { setError(err.message); } finally { setBusy(false); } }
+  async function update(user, data) { if (!window.confirm(`Cập nhật quyền/trạng thái của ${user.name}? Các phiên đăng nhập của thành viên sẽ kết thúc.`)) return; setBusy(true); setError(''); try { await api('/users/' + user.id, json('PATCH', data)); await refresh(); } catch (err) { setError(err.message); } finally { setBusy(false); } }
+  return <section className="board"><h2>Thành viên nhóm</h2><p className="muted">{users.filter(user => user.active).length} thành viên đang hoạt động</p>{error && <p role="alert" className="error">{error}</p>}{notice && <p role="status" className="success">{notice}</p>}
+    <div className="member-list">{users.map(user => <article className="member" key={user.id}><span className="avatar">{user.name.slice(0, 1).toUpperCase()}</span><div><strong>{user.name}{user.id === currentUser.id ? ' (bạn)' : ''}</strong><small>{user.email}</small><small>{user.active ? 'Đang hoạt động' : 'Đã khóa'}</small></div>{currentUser.role === 'admin' ? <div className="member-controls"><select aria-label={`Vai trò của ${user.name}`} value={user.role} disabled={busy} onChange={e => update(user, { role: e.target.value })}><option value="member">Thành viên</option><option value="admin">Quản trị viên</option></select><button disabled={busy} onClick={() => update(user, { active: !user.active })}>{user.active ? 'Khóa' : 'Mở khóa'}</button></div> : <span className="pill">{user.role === 'admin' ? 'Quản trị viên' : 'Thành viên'}</span>}</article>)}</div>
+    {currentUser.role === 'admin' && <form className="editor new-member" onSubmit={create}><h3>Thêm thành viên</h3><div className="form-grid"><label>Họ tên<input required maxLength={80} value={draft.name} disabled={busy} onChange={e => setDraft({ ...draft, name: e.target.value })} /></label><label>Email<input type="email" required maxLength={254} value={draft.email} disabled={busy} onChange={e => setDraft({ ...draft, email: e.target.value })} /></label><label>Mật khẩu ban đầu<input type="password" autoComplete="new-password" required minLength={12} maxLength={128} value={draft.password} disabled={busy} onChange={e => setDraft({ ...draft, password: e.target.value })} /></label><label>Vai trò<select value={draft.role} disabled={busy} onChange={e => setDraft({ ...draft, role: e.target.value })}><option value="member">Thành viên</option><option value="admin">Quản trị viên</option></select></label></div><button className="primary" disabled={busy}>{busy ? 'Đang tạo…' : 'Tạo tài khoản'}</button></form>}
+  </section>;
+}
